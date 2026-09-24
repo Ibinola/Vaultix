@@ -17,6 +17,7 @@ import { EmailVerification } from '../../user/entities/email-verification.entity
 import { UpdateProfileDto } from '../dto/profile.dto';
 import { IpfsService } from '../../ipfs/ipfs.service';
 import { EmailService } from '../../../email/email.service';
+import { EmailTemplatesService } from '../../../email/email-templates.service';
 import { PreferenceService } from '../../../notifications/preference.service';
 import { validateJwtSecret } from './jwt-validation.util';
 
@@ -46,6 +47,7 @@ export class AuthService {
     private emailVerificationRepository: Repository<EmailVerification>,
     private ipfsService: IpfsService,
     private emailService: EmailService,
+    private emailTemplatesService: EmailTemplatesService,
     @Inject(forwardRef(() => PreferenceService))
     private preferenceService: PreferenceService,
   ) {}
@@ -233,14 +235,16 @@ export class AuthService {
 
     // Queue the verification email for async delivery (retried on failure)
     const verificationUrl = this.buildVerificationUrl(token);
+    const rendered = this.emailTemplatesService.renderVerification({
+      userName: user.displayName ?? undefined,
+      email: user.email,
+      verificationUrl,
+    });
     await this.emailService.sendEmail(
       user.email,
-      'Verify your email address - Vaultix',
-      this.buildVerificationEmailHtml(user, verificationUrl),
-      `Hi${user.displayName ? ` ${user.displayName}` : ''},\n\n` +
-        `Please verify your email address by opening the link below:\n\n` +
-        `${verificationUrl}\n\n` +
-        `This link expires in 24 hours. If you did not request this, you can ignore this email.`,
+      rendered.subject,
+      rendered.html,
+      rendered.text,
     );
     this.logger.log(`Verification email queued for user ${userId}`);
   }
@@ -251,20 +255,6 @@ export class AuthService {
       'http://localhost:3000/auth/profile/verify-email',
     );
     return `${baseUrl}?token=${encodeURIComponent(token)}`;
-  }
-
-  private buildVerificationEmailHtml(
-    user: User,
-    verificationUrl: string,
-  ): string {
-    const greeting = user.displayName ? `Hi ${user.displayName},` : 'Hi,';
-    return (
-      `<p>${greeting}</p>` +
-      `<p>Please verify your email address to finish setting up your Vaultix account.</p>` +
-      `<p><a href="${verificationUrl}">Verify email address</a></p>` +
-      `<p>Or copy and paste this link into your browser:<br/>${verificationUrl}</p>` +
-      `<p><small>This link expires in 24 hours. If you did not request this, you can ignore this email.</small></p>`
-    );
   }
 
   async verifyEmail(token: string): Promise<void> {
