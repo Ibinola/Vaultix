@@ -6,7 +6,19 @@
 
 /** Escape text for safe interpolation into HTML content or attributes. */
 export function escapeHtml(value: unknown): string {
-  const str = value === null || value === undefined ? '' : String(value);
+  let str = '';
+
+  if (typeof value === 'string') {
+    str = value;
+  } else if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    typeof value === 'symbol'
+  ) {
+    str = value.toString();
+  }
+
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
