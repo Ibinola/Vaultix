@@ -110,6 +110,7 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
+    "forceExit": true,
     "setupFiles": [
       "../jest-setup.js"
     ]

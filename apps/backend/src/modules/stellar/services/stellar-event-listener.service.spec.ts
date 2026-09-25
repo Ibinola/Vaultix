@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import { StellarEventListenerService } from './stellar-event-listener.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -262,7 +261,7 @@ describe('StellarEventListenerService', () => {
       expect(escrowRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 'escrow-1',
-          releasedAmount: 100,
+          releasedAmount: '100',
           stellarTxHash: 'tx-abc-123',
         }),
       );
@@ -383,7 +382,7 @@ describe('StellarEventListenerService', () => {
       );
       expect(escrowRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          releasedAmount: 200,
+          releasedAmount: '200',
         }),
       );
     });
@@ -392,7 +391,7 @@ describe('StellarEventListenerService', () => {
       // First milestone already released
       const escrowWithFirstReleased = {
         ...baseEscrow,
-        releasedAmount: 100,
+        releasedAmount: '100',
         conditions: [
           { ...baseConditions[0], isReleased: true },
           { ...baseConditions[1] },
@@ -406,7 +405,7 @@ describe('StellarEventListenerService', () => {
 
       expect(escrowRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          releasedAmount: 300, // 100 + 200
+          releasedAmount: '300', // 100 + 200
         }),
       );
     });

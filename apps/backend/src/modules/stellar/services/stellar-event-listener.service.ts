@@ -23,6 +23,10 @@ import {
   StellarEventType,
 } from '../entities/stellar-event.entity';
 import { Escrow, EscrowStatus } from '../../escrow/entities/escrow.entity';
+import {
+  decimalToBaseUnits,
+  baseUnitsToDecimal,
+} from '../../escrow/amount.util';
 import { Condition } from '../../escrow/entities/condition.entity';
 import {
   EscrowEvent,
@@ -694,7 +698,10 @@ export class StellarEventListenerService
     await this.conditionRepository.save(condition);
 
     // 5. Update escrow releasedAmount
-    escrow.releasedAmount = Number(escrow.releasedAmount || 0) + releaseAmount;
+    escrow.releasedAmount = baseUnitsToDecimal(
+      decimalToBaseUnits(String(escrow.releasedAmount || 0)) +
+        decimalToBaseUnits(String(releaseAmount)),
+    );
     escrow.stellarTxHash = event.txHash;
     await this.escrowRepository.save(escrow);
 

@@ -52,10 +52,11 @@ export class Escrow {
   description?: string;
 
   @Column({ type: 'decimal', precision: 18, scale: 7 })
-  amount: number;
+  /** SQL decimal amounts remain strings to avoid IEEE-754 loss. */
+  amount: string;
 
   @Column({ type: 'decimal', precision: 18, scale: 7, default: 0 })
-  releasedAmount: number;
+  releasedAmount: string;
 
   @Column({ default: 'XLM', name: 'asset_code' })
   assetCode: string;
