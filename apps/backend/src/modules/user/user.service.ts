@@ -75,6 +75,47 @@ export class UserService {
   }
 
   /**
+   * Set (or replace) the wallet challenge nonce and its expiry for a user.
+   *
+   * Issuing a new challenge atomically supersedes any previous one: the stored
+   * nonce and expiry are overwritten together, so a superseded challenge can no
+   * longer be verified.
+   */
+  async setChallengeNonce(
+    userId: string,
+    nonce: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.userRepository.update(
+      { id: userId },
+      { nonce, nonceExpiresAt: expiresAt },
+    );
+  }
+
+  /**
+   * Atomically consume a wallet challenge.
+   *
+   * Uses a single conditional UPDATE that matches the *exact* nonce that was
+   * verified and clears both the nonce and its expiry to explicit NULL. The
+   * affected-row count decides the winner, so under concurrency only one
+   * verification can succeed: a second request (or a replay, or a challenge
+   * that has been superseded by a newer nonce) matches no rows and is rejected.
+   *
+   * @returns `true` if this caller consumed the challenge, `false` if it was
+   *          already consumed or no longer the current challenge.
+   */
+  async consumeChallenge(userId: string, nonce: string): Promise<boolean> {
+    const result = await this.userRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({ nonce: null, nonceExpiresAt: null })
+      .where('id = :userId AND nonce = :nonce', { userId, nonce })
+      .execute();
+
+    return (result.affected ?? 0) === 1;
+  }
+
+  /**
    * Atomically consume a refresh token and issue its successor inside a
    * single serialised transaction.
    *
