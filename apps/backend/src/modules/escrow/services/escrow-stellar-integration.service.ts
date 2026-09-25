@@ -419,6 +419,7 @@ export class EscrowStellarIntegrationService {
     winnerPublicKey: string,
     arbitratorPublicKey: string,
     splitWinnerAmount?: string,
+    resolutionEvidenceHash?: string,
   ): Promise<string> {
     try {
       this.logger.log(
@@ -429,6 +430,7 @@ export class EscrowStellarIntegrationService {
         escrowId,
         winnerPublicKey,
         splitWinnerAmount,
+        resolutionEvidenceHash,
       );
 
       const transaction = await this.stellarService.buildTransaction(

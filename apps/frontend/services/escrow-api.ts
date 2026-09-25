@@ -146,11 +146,15 @@ export class EscrowService {
   }
 
   static async updateEscrowStatus(id: string, status: IEscrow['status']): Promise<IEscrow> {
-    // This would depend on your backend API structure
-    // You might need separate endpoints for each status transition
+    // Generic status transitions are only supported where a dedicated endpoint
+    // exists. Funding, release and cancel have their own endpoints; anything
+    // else (notably "disputed") must go through its dedicated action instead of
+    // a fabricated status mutation.
     switch (status) {
-      case CanonicalEscrowStatus.FUNDED:
-        return this.fundEscrow(id, { amount: '0', asset: 'XLM' });
+      // 'released' normalizes to COMPLETED, so the canonical constant covers
+      // both spellings. FUNDED is deliberately absent: funding has its own
+      // endpoint that takes a real amount, and routing it through here would
+      // fabricate a zero-value deposit.
       case CanonicalEscrowStatus.COMPLETED:
         return this.releaseFunds(id);
       case CanonicalEscrowStatus.CANCELLED:

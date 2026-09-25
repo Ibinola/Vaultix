@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/unbound-method */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { UserService } from '../../user/user.service';
@@ -38,6 +35,8 @@ describe('AuthService', () => {
     id: 'user-id',
     walletAddress: 'GD...123',
     nonce: 'test-nonce',
+    nonceExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    isActive: true,
   };
 
   const mockRefreshToken = {
@@ -56,6 +55,8 @@ describe('AuthService', () => {
             findByWalletAddress: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
+            setChallengeNonce: jest.fn(),
+            consumeChallenge: jest.fn(),
             findRefreshToken: jest.fn(),
             invalidateRefreshToken: jest.fn(),
             atomicRotateRefreshToken: jest.fn(),
@@ -146,6 +147,7 @@ describe('AuthService', () => {
       expect(userService.create).toHaveBeenCalledWith({
         walletAddress: 'GD...123',
         nonce: expect.any(String),
+        nonceExpiresAt: expect.any(Date),
       });
     });
 
@@ -162,7 +164,7 @@ describe('AuthService', () => {
 
     it('should not seed preferences when the user already exists', async () => {
       userService.findByWalletAddress.mockResolvedValue(mockUser as any);
-      userService.update.mockResolvedValue(mockUser as any);
+      userService.setChallengeNonce.mockResolvedValue(undefined);
 
       await service.generateChallenge('GD...123');
 
@@ -171,14 +173,27 @@ describe('AuthService', () => {
 
     it('should update nonce if user exists', async () => {
       userService.findByWalletAddress.mockResolvedValue(mockUser as any);
-      userService.update.mockResolvedValue(mockUser as any);
+      userService.setChallengeNonce.mockResolvedValue(undefined);
 
       const result = await service.generateChallenge('GD...123');
 
       expect(result).toHaveProperty('nonce');
-      expect(userService.update).toHaveBeenCalledWith(mockUser.id, {
-        nonce: expect.any(String),
-      });
+      expect(userService.setChallengeNonce).toHaveBeenCalledWith(
+        mockUser.id,
+        expect.any(String),
+        expect.any(Date),
+      );
+    });
+
+    it('should return the signing message containing the nonce', async () => {
+      userService.findByWalletAddress.mockResolvedValue(null);
+      userService.create.mockResolvedValue(mockUser as any);
+
+      const result = await service.generateChallenge('GD...123');
+
+      expect(result.message).toBe(
+        `Sign this message to authenticate with Vaultix: ${result.nonce}`,
+      );
     });
   });
 
@@ -193,16 +208,51 @@ describe('AuthService', () => {
 
     it('should return tokens on valid signature', async () => {
       userService.findByWalletAddress.mockResolvedValue(mockUser as any);
-      userService.update.mockResolvedValue(mockUser as any);
+      userService.consumeChallenge.mockResolvedValue(true);
       userService.createRefreshToken.mockResolvedValue({} as any);
 
       const result = await service.verifySignature('sig', 'GD...123');
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
-      expect(userService.update).toHaveBeenCalledWith(mockUser.id, {
-        nonce: undefined,
-      });
+      expect(userService.consumeChallenge).toHaveBeenCalledWith(
+        mockUser.id,
+        mockUser.nonce,
+      );
+    });
+
+    it('should reject an inactive user', async () => {
+      userService.findByWalletAddress.mockResolvedValue({
+        ...mockUser,
+        isActive: false,
+      } as any);
+
+      await expect(service.verifySignature('sig', 'GD...123')).rejects.toThrow(
+        'Account is not active',
+      );
+      expect(userService.consumeChallenge).not.toHaveBeenCalled();
+    });
+
+    it('should reject an expired challenge', async () => {
+      userService.findByWalletAddress.mockResolvedValue({
+        ...mockUser,
+        nonceExpiresAt: new Date(Date.now() - 1000),
+      } as any);
+
+      await expect(service.verifySignature('sig', 'GD...123')).rejects.toThrow(
+        'Challenge expired',
+      );
+      expect(userService.consumeChallenge).not.toHaveBeenCalled();
+    });
+
+    it('should reject when the challenge was already consumed (replay)', async () => {
+      userService.findByWalletAddress.mockResolvedValue(mockUser as any);
+      userService.consumeChallenge.mockResolvedValue(false);
+
+      await expect(service.verifySignature('sig', 'GD...123')).rejects.toThrow(
+        'Invalid challenge',
+      );
+      expect(userService.createRefreshToken).not.toHaveBeenCalled();
     });
   });
 
