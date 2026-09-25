@@ -41,5 +41,7 @@ export function submitEscrowCreation(
   signedXdr: string,
 ): Promise<SettledEscrowCreation> {
   return apiClient.post<SettledEscrowCreation>(
+    `/escrows/creation-intents/${encodeURIComponent(intentId)}/submit`,
+    { signedXdr },
   );
 }
