@@ -1,6 +1,7 @@
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { normalizeMetadataHash } from '../../modules/escrow/utils/metadata-hash.util';
+import { decimalToBaseUnits } from '../../modules/escrow/amount.util';
 
 @Injectable()
 export class EscrowOperationsService {
@@ -42,8 +43,15 @@ export class EscrowOperationsService {
               key: StellarSdk.xdr.ScVal.scvSymbol('amount'),
               val: StellarSdk.xdr.ScVal.scvI128(
                 new StellarSdk.xdr.Int128Parts({
-                  lo: new StellarSdk.xdr.Uint64(m.amount),
-                  hi: new StellarSdk.xdr.Int64('0'),
+                  lo: new StellarSdk.xdr.Uint64(
+                    (
+                      decimalToBaseUnits(m.amount) &
+                      ((1n << 64n) - 1n)
+                    ).toString(),
+                  ),
+                  hi: new StellarSdk.xdr.Int64(
+                    (decimalToBaseUnits(m.amount) >> 64n).toString(),
+                  ),
                 }),
               ),
             }),
