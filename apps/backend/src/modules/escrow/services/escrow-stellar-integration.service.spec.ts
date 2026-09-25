@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import { EscrowStellarIntegrationService } from './escrow-stellar-integration.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -180,6 +179,23 @@ describe('EscrowStellarIntegrationService', () => {
         'e1',
         'winner-pubkey',
         '50',
+        undefined,
+      );
+    });
+
+    it('forwards an optional resolution evidence hash', async () => {
+      await service.resolveOnChainDispute(
+        'e1',
+        'winner-pubkey',
+        'arbitrator-pubkey',
+        '50',
+        'ab'.repeat(32),
+      );
+      expect(escrowOps.createResolveDisputeOps).toHaveBeenCalledWith(
+        'e1',
+        'winner-pubkey',
+        '50',
+        'ab'.repeat(32),
       );
     });
   });

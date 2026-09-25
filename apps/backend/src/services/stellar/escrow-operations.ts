@@ -1,7 +1,7 @@
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { normalizeMetadataHash } from '../../modules/escrow/utils/metadata-hash.util';
-import { decimalToBaseUnits } from '../../modules/escrow/amount.util';
+import { decimalToBaseUnits, I128_MAX } from '../../modules/escrow/amount.util';
 
 @Injectable()
 export class EscrowOperationsService {
@@ -260,16 +260,28 @@ export class EscrowOperationsService {
   }
 
   /**
-   * Creates operations for resolving a dispute
+   * Creates operations for resolving a dispute.
+   *
+   * Mirrors the on-chain `resolve_dispute(escrow_id, winner,
+   * split_winner_amount, resolution_evidence_hash)` entrypoint. Both optional
+   * arguments are encoded with the contract's actual types so that neither is
+   * silently dropped: `Option<i128>` carries a base-unit i128 and
+   * `Option<BytesN<32>>` carries a raw sha2-256 digest.
    */
   createResolveDisputeOps(
     escrowId: string,
     winnerPublicKey: string,
     splitWinnerAmount?: string,
+    resolutionEvidenceHash?: string,
   ): StellarSdk.xdr.Operation[] {
     try {
       this.logger.log(
         `Creating resolve dispute ops for escrow ID: ${escrowId}`,
+      );
+
+      const splitAmount = this.encodeOptionalSplitAmount(splitWinnerAmount);
+      const evidenceHash = this.encodeOptionalEvidenceHash(
+        resolutionEvidenceHash,
       );
 
       const contract = new StellarSdk.Contract(this.contractId);
@@ -277,16 +289,8 @@ export class EscrowOperationsService {
         'resolve_dispute',
         StellarSdk.xdr.ScVal.scvU64(new StellarSdk.xdr.Uint64(escrowId)),
         new StellarSdk.Address(winnerPublicKey).toScVal(),
-        splitWinnerAmount
-          ? StellarSdk.xdr.ScVal.scvVec([
-              StellarSdk.xdr.ScVal.scvI128(
-                new StellarSdk.xdr.Int128Parts({
-                  lo: new StellarSdk.xdr.Uint64(splitWinnerAmount),
-                  hi: new StellarSdk.xdr.Int64('0'),
-                }),
-              ),
-            ])
-          : StellarSdk.xdr.ScVal.scvVec([]), // Option::None
+        splitAmount,
+        evidenceHash,
       );
 
       return [op];
@@ -296,6 +300,68 @@ export class EscrowOperationsService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Encodes `Option<i128>` for the split amount using the contract type.
+   * Accepts a decimal base-unit string; rejects malformed or out-of-range
+   * values instead of coercing them.
+   */
+  private encodeOptionalSplitAmount(
+    splitWinnerAmount?: string,
+  ): StellarSdk.xdr.ScVal {
+    if (
+      splitWinnerAmount === undefined ||
+      splitWinnerAmount === null ||
+      splitWinnerAmount === ''
+    ) {
+      return StellarSdk.xdr.ScVal.scvVec([]);
+    }
+
+    const normalized = String(splitWinnerAmount).trim();
+    if (!/^\d+$/.test(normalized)) {
+      throw new Error('split amount must be a non-negative integer string');
+    }
+
+    const units = BigInt(normalized);
+    if (units > I128_MAX) {
+      throw new Error('split amount is outside the supported i128 range');
+    }
+
+    const lo = units & ((1n << 64n) - 1n);
+    const hi = units >> 64n;
+
+    return StellarSdk.xdr.ScVal.scvVec([
+      StellarSdk.xdr.ScVal.scvI128(
+        new StellarSdk.xdr.Int128Parts({
+          lo: new StellarSdk.xdr.Uint64(lo.toString()),
+          hi: new StellarSdk.xdr.Int64(hi.toString()),
+        }),
+      ),
+    ]);
+  }
+
+  /**
+   * Encodes `Option<BytesN<32>>` for the resolution evidence hash. Accepts a
+   * raw 32-byte sha2-256 digest as hex (or a CID/IPFS reference) and reuses the
+   * existing digest normalizer so malformed evidence is rejected.
+   */
+  private encodeOptionalEvidenceHash(
+    resolutionEvidenceHash?: string,
+  ): StellarSdk.xdr.ScVal {
+    if (
+      resolutionEvidenceHash === undefined ||
+      resolutionEvidenceHash === null ||
+      resolutionEvidenceHash.trim() === ''
+    ) {
+      return StellarSdk.xdr.ScVal.scvVec([]);
+    }
+
+    const digest = normalizeMetadataHash(resolutionEvidenceHash.trim());
+
+    return StellarSdk.xdr.ScVal.scvVec([
+      StellarSdk.xdr.ScVal.scvBytes(Buffer.from(digest, 'hex')),
+    ]);
   }
 
   /**
