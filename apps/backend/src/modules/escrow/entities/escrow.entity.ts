@@ -41,6 +41,7 @@ export enum EscrowType {
   'status',
   'createdAt',
 ])
+@Index('IDX_escrows_chainEscrowId', ['chainEscrowId'], { unique: true })
 export class Escrow {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -88,6 +89,9 @@ export class Escrow {
 
   @Column({ nullable: true })
   stellarTxHash?: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  chainEscrowId?: string;
 
   @Column({ type: 'datetime', nullable: true })
   fundedAt?: Date;

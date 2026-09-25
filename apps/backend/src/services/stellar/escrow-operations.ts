@@ -24,6 +24,7 @@ export class EscrowOperationsService {
     milestones: Array<{ id: number; amount: string; description: string }>,
     deadline: number,
     metadataReference: string,
+    decimals = 7,
   ): StellarSdk.xdr.Operation[] {
     try {
       this.logger.log(
@@ -45,12 +46,12 @@ export class EscrowOperationsService {
                 new StellarSdk.xdr.Int128Parts({
                   lo: new StellarSdk.xdr.Uint64(
                     (
-                      decimalToBaseUnits(m.amount) &
+                      decimalToBaseUnits(m.amount, decimals) &
                       ((1n << 64n) - 1n)
                     ).toString(),
                   ),
                   hi: new StellarSdk.xdr.Int64(
-                    (decimalToBaseUnits(m.amount) >> 64n).toString(),
+                    (decimalToBaseUnits(m.amount, decimals) >> 64n).toString(),
                   ),
                 }),
               ),
