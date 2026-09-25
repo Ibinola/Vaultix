@@ -24,8 +24,11 @@ export class User {
   @Column({ unique: true })
   walletAddress!: string;
 
-  @Column({ nullable: true })
-  nonce?: string;
+  @Column({ type: 'varchar', nullable: true })
+  nonce?: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  nonceExpiresAt?: Date | null;
 
   @Column({ default: true })
   isActive!: boolean;

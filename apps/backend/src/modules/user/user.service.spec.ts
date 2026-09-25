@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/unbound-method */
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserService } from './user.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -13,10 +12,22 @@ describe('UserService', () => {
   let mockDataSource: {
     transaction: jest.Mock;
   };
+  let mockQueryBuilder: {
+    update: jest.Mock;
+    set: jest.Mock;
+    where: jest.Mock;
+    execute: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockDataSource = {
       transaction: jest.fn(),
+    };
+    mockQueryBuilder = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -29,6 +40,7 @@ describe('UserService', () => {
             create: jest.fn(),
             save: jest.fn(),
             update: jest.fn(),
+            createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
           },
         },
         {
@@ -260,6 +272,55 @@ describe('UserService', () => {
       await expect(
         service.atomicRotateRefreshToken('old-token', 'new-token', newExpiry),
       ).rejects.toThrow('USER_INACTIVE');
+    });
+  });
+
+  describe('setChallengeNonce', () => {
+    it('should store the nonce and expiry together', async () => {
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      userRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.setChallengeNonce('u1', 'nonce-abc', expiresAt);
+
+      expect(userRepo.update).toHaveBeenCalledWith(
+        { id: 'u1' },
+        { nonce: 'nonce-abc', nonceExpiresAt: expiresAt },
+      );
+    });
+  });
+
+  describe('consumeChallenge', () => {
+    it('should clear nonce and expiry to null on the exact challenge', async () => {
+      const result = await service.consumeChallenge('u1', 'nonce-abc');
+
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(User);
+      expect(mockQueryBuilder.set).toHaveBeenCalledWith({
+        nonce: null,
+        nonceExpiresAt: null,
+      });
+      expect(mockQueryBuilder.where).toHaveBeenCalledWith(
+        'id = :userId AND nonce = :nonce',
+        { userId: 'u1', nonce: 'nonce-abc' },
+      );
+      expect(result).toBe(true);
+    });
+
+    it('should return false when the challenge was already consumed', async () => {
+      mockQueryBuilder.execute.mockResolvedValue({ affected: 0 });
+
+      const result = await service.consumeChallenge('u1', 'nonce-abc');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when the challenge was superseded by a newer nonce', async () => {
+      // The conditional UPDATE matches only the current nonce; a stale nonce
+      // affects zero rows.
+      mockQueryBuilder.execute.mockResolvedValue({ affected: 0 });
+
+      const result = await service.consumeChallenge('u1', 'stale-nonce');
+
+      expect(result).toBe(false);
     });
   });
 });

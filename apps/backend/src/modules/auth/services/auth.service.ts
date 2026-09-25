@@ -36,6 +36,9 @@ interface StellarSdkModule {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const StellarSdk: StellarSdkModule = require('stellar-sdk') as StellarSdkModule;
 
+/** Wallets must sign a challenge within this window (milliseconds). */
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -58,7 +61,8 @@ export class AuthService {
   ): Promise<{ nonce: string; message: string }> {
     this.logger.log({ msg: 'Generating challenge', walletAddress });
     const nonce = crypto.randomBytes(16).toString('hex');
-    const message = `Sign this message to authenticate with Vaultix: ${nonce}`;
+    const message = this.buildChallengeMessage(nonce);
+    const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS);
 
     let user = await this.userService.findByWalletAddress(walletAddress);
 
@@ -66,6 +70,7 @@ export class AuthService {
       user = await this.userService.create({
         walletAddress,
         nonce,
+        nonceExpiresAt: expiresAt,
       });
 
       // Seed default notification preferences for the new user. Failures
@@ -79,7 +84,9 @@ export class AuthService {
         );
       }
     } else {
-      user = await this.userService.update(user.id, { nonce });
+      // Storing the new nonce and expiry together invalidates any previously
+      // issued challenge for this wallet.
+      await this.userService.setChallengeNonce(user.id, nonce, expiresAt);
     }
 
     return { nonce, message };
@@ -101,7 +108,17 @@ export class AuthService {
       );
     }
 
-    const message = `Sign this message to authenticate with Vaultix: ${user.nonce}`;
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is not active');
+    }
+
+    if (user.nonceExpiresAt && user.nonceExpiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException(
+        'Challenge expired. Please request a new one.',
+      );
+    }
+
+    const message = this.buildChallengeMessage(user.nonce);
 
     try {
       const verifier = StellarSdk.Keypair.fromPublicKey(publicKey);
@@ -116,7 +133,18 @@ export class AuthService {
       throw new UnauthorizedException('Signature verification failed');
     }
 
-    await this.userService.update(user.id, { nonce: undefined });
+    // Consume the exact challenge atomically. A replayed, superseded or
+    // concurrently-submitted challenge loses the conditional update and is
+    // rejected, so only one verification can ever succeed.
+    const consumed = await this.userService.consumeChallenge(
+      user.id,
+      user.nonce,
+    );
+    if (!consumed) {
+      throw new UnauthorizedException(
+        'Invalid challenge. Please request a new one.',
+      );
+    }
 
     const accessToken = this.generateAccessToken(user.id, walletAddress);
     const refreshToken = await this.generateRefreshToken(user.id);
@@ -127,6 +155,15 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * The supported wallet signing format. Both challenge issuance and
+   * verification derive the message from this single helper so the signed
+   * payload always matches, and the format stays stable for clients.
+   */
+  private buildChallengeMessage(nonce: string): string {
+    return `Sign this message to authenticate with Vaultix: ${nonce}`;
   }
 
   /**
@@ -170,8 +207,7 @@ export class AuthService {
 
       return { accessToken: newAccessToken, refreshToken: result.newToken };
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
 
       // Map domain errors to HTTP-layer exceptions without leaking token
       // values into logs.
