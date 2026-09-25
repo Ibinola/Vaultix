@@ -11,13 +11,17 @@ describe("useEscrowFunding", () => {
 
   it("transitions through building, wallet, submitting, confirming, and complete", async () => {
     let resolveSigning!: (value: { signedXDR: string }) => void;
+    let resolveResponseBody!: (value: { txHash: string }) => void;
     const signing = new Promise<{ signedXDR: string }>((resolve) => {
       resolveSigning = resolve;
+    });
+    const responseBody = new Promise<{ txHash: string }>((resolve) => {
+      resolveResponseBody = resolve;
     });
     (window as any).freighter = { signTransaction: jest.fn(() => signing) };
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ txHash: "tx_hash_123" }),
+      json: () => responseBody,
     });
     const { result } = renderHook(() => useEscrowFunding());
 
@@ -30,14 +34,14 @@ describe("useEscrowFunding", () => {
 
     await act(async () => {
       resolveSigning({ signedXDR: "signed-xdr" });
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await waitFor(() => expect(result.current.phase).toBe("confirming"));
 
     await act(async () => {
+      resolveResponseBody({ txHash: "tx_hash_123" });
       await funding;
     });
-    expect(["building", "waiting", "submitting", "confirming", "complete"]).toContain("building");
     expect(result.current.phase).toBe("complete");
     expect(result.current.txHash).toBe("tx_hash_123");
   });
