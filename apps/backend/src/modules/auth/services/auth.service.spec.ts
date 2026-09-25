@@ -12,6 +12,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { EmailVerification } from '../../user/entities/email-verification.entity';
 import { IpfsService } from '../../ipfs/ipfs.service';
 import { EmailService } from '../../../email/email.service';
+import { EmailTemplatesService } from '../../../email/email-templates.service';
 import { PreferenceService } from '../../../notifications/preference.service';
 
 // Mock Stellar SDK
@@ -93,6 +94,18 @@ describe('AuthService', () => {
           provide: EmailService,
           useValue: {
             sendEmail: jest.fn(),
+          },
+        },
+        {
+          provide: EmailTemplatesService,
+          useValue: {
+            renderVerification: jest.fn(
+              (data: { verificationUrl: string }) => ({
+                subject: 'Verify your email address - Vaultix',
+                html: `<p><a href="${data.verificationUrl}">Verify email address</a></p>`,
+                text: `Verify: ${data.verificationUrl}`,
+              }),
+            ),
           },
         },
         {
