@@ -4,14 +4,21 @@ import { UserService } from './user.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 describe('UserService', () => {
   let service: UserService;
   let userRepo: jest.Mocked<Repository<User>>;
   let refreshTokenRepo: jest.Mocked<Repository<RefreshToken>>;
+  let mockDataSource: {
+    transaction: jest.Mock;
+  };
 
   beforeEach(async () => {
+    mockDataSource = {
+      transaction: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserService,
@@ -32,6 +39,10 @@ describe('UserService', () => {
             save: jest.fn(),
             update: jest.fn(),
           },
+        },
+        {
+          provide: DataSource,
+          useValue: mockDataSource,
         },
       ],
     }).compile();
@@ -118,6 +129,137 @@ describe('UserService', () => {
         { token: 't1' },
         { isActive: false },
       );
+    });
+  });
+
+  describe('atomicRotateRefreshToken', () => {
+    const futureDate = new Date(Date.now() + 1000 * 60 * 60);
+    const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    it('should consume old token and issue successor in one transaction', async () => {
+      const consumedToken = {
+        token: 'old-token',
+        userId: 'u1',
+        expiresAt: futureDate,
+        isActive: false,
+        user: { id: 'u1', walletAddress: 'GD...123', isActive: true },
+      };
+
+      const successor = {
+        token: 'new-token',
+        userId: 'u1',
+        expiresAt: newExpiry,
+        isActive: true,
+      };
+
+      mockDataSource.transaction.mockImplementation(
+        async (_isolation: string, cb: (manager: any) => Promise<any>) => {
+          const manager = {
+            createQueryBuilder: jest.fn().mockReturnValue({
+              update: jest.fn().mockReturnThis(),
+              set: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              execute: jest.fn().mockResolvedValue({ affected: 1 }),
+            }),
+            findOne: jest.fn().mockResolvedValue(consumedToken),
+            create: jest.fn().mockReturnValue(successor),
+            save: jest.fn().mockResolvedValue(successor),
+          };
+          return cb(manager);
+        },
+      );
+
+      const result = await service.atomicRotateRefreshToken(
+        'old-token',
+        'new-token',
+        newExpiry,
+      );
+
+      expect(result.consumed).toEqual(consumedToken);
+      expect(result.newToken).toBe('new-token');
+      expect(result.newExpiresAt).toBe(newExpiry);
+      expect(mockDataSource.transaction).toHaveBeenCalledWith(
+        'SERIALIZABLE',
+        expect.any(Function),
+      );
+    });
+
+    it('should throw REFRESH_TOKEN_ALREADY_CONSUMED when token is inactive', async () => {
+      mockDataSource.transaction.mockImplementation(
+        async (_isolation: string, cb: (manager: any) => Promise<any>) => {
+          const manager = {
+            createQueryBuilder: jest.fn().mockReturnValue({
+              update: jest.fn().mockReturnThis(),
+              set: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              execute: jest.fn().mockResolvedValue({ affected: 0 }),
+            }),
+          };
+          return cb(manager);
+        },
+      );
+
+      await expect(
+        service.atomicRotateRefreshToken('old-token', 'new-token', newExpiry),
+      ).rejects.toThrow('REFRESH_TOKEN_ALREADY_CONSUMED');
+    });
+
+    it('should throw REFRESH_TOKEN_EXPIRED when token has expired', async () => {
+      const expiredToken = {
+        token: 'old-token',
+        userId: 'u1',
+        expiresAt: new Date(0), // expired
+        isActive: false,
+        user: { id: 'u1', walletAddress: 'GD...123', isActive: true },
+      };
+
+      mockDataSource.transaction.mockImplementation(
+        async (_isolation: string, cb: (manager: any) => Promise<any>) => {
+          const manager = {
+            createQueryBuilder: jest.fn().mockReturnValue({
+              update: jest.fn().mockReturnThis(),
+              set: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              execute: jest.fn().mockResolvedValue({ affected: 1 }),
+            }),
+            findOne: jest.fn().mockResolvedValue(expiredToken),
+          };
+          return cb(manager);
+        },
+      );
+
+      await expect(
+        service.atomicRotateRefreshToken('old-token', 'new-token', newExpiry),
+      ).rejects.toThrow('REFRESH_TOKEN_EXPIRED');
+    });
+
+    it('should throw USER_INACTIVE when user is deactivated', async () => {
+      const tokenWithInactiveUser = {
+        token: 'old-token',
+        userId: 'u1',
+        expiresAt: futureDate,
+        isActive: false,
+        user: { id: 'u1', walletAddress: 'GD...123', isActive: false },
+      };
+
+      mockDataSource.transaction.mockImplementation(
+        async (_isolation: string, cb: (manager: any) => Promise<any>) => {
+          const manager = {
+            createQueryBuilder: jest.fn().mockReturnValue({
+              update: jest.fn().mockReturnThis(),
+              set: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              execute: jest.fn().mockResolvedValue({ affected: 1 }),
+            }),
+            findOne: jest.fn().mockResolvedValue(tokenWithInactiveUser),
+          };
+          return cb(manager);
+        },
+      );
+
+      await expect(
+        service.atomicRotateRefreshToken('old-token', 'new-token', newExpiry),
+      ).rejects.toThrow('USER_INACTIVE');
     });
   });
 });

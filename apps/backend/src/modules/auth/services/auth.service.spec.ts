@@ -58,6 +58,7 @@ describe('AuthService', () => {
             update: jest.fn(),
             findRefreshToken: jest.fn(),
             invalidateRefreshToken: jest.fn(),
+            atomicRotateRefreshToken: jest.fn(),
             findById: jest.fn(),
             createRefreshToken: jest.fn(),
           },
@@ -206,30 +207,74 @@ describe('AuthService', () => {
   });
 
   describe('refreshAccessToken', () => {
-    it('should throw if token invalid or expired', async () => {
-      userService.findRefreshToken.mockResolvedValue(null);
-      await expect(service.refreshAccessToken('invalid')).rejects.toThrow(
-        UnauthorizedException,
+    it('should return new tokens on successful rotation', async () => {
+      userService.atomicRotateRefreshToken.mockResolvedValue({
+        consumed: {
+          ...mockRefreshToken,
+          user: mockUser,
+        },
+        newToken: 'new-refresh-token',
+        newExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      } as any);
+
+      const result = await service.refreshAccessToken('refresh-token');
+
+      expect(result.accessToken).toBe('access-token');
+      expect(result.refreshToken).toBe('new-refresh-token');
+      expect(userService.atomicRotateRefreshToken).toHaveBeenCalledWith(
+        'refresh-token',
+        expect.any(String),
+        expect.any(Date),
+      );
+    });
+
+    it('should throw ConflictException on replay (already consumed)', async () => {
+      userService.atomicRotateRefreshToken.mockRejectedValue(
+        new Error('REFRESH_TOKEN_ALREADY_CONSUMED'),
       );
 
-      userService.findRefreshToken.mockResolvedValue({
-        ...mockRefreshToken,
-        expiresAt: new Date(0),
-      } as any);
+      const { ConflictException } = await import('@nestjs/common');
+      await expect(service.refreshAccessToken('used-token')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('should throw UnauthorizedException on expired token', async () => {
+      userService.atomicRotateRefreshToken.mockRejectedValue(
+        new Error('REFRESH_TOKEN_EXPIRED'),
+      );
+
       await expect(service.refreshAccessToken('expired')).rejects.toThrow(
         UnauthorizedException,
       );
     });
 
-    it('should return new tokens', async () => {
-      userService.findRefreshToken.mockResolvedValue(mockRefreshToken as any);
-      userService.createRefreshToken.mockResolvedValue({} as any);
+    it('should throw UnauthorizedException when token not found', async () => {
+      userService.atomicRotateRefreshToken.mockRejectedValue(
+        new Error('REFRESH_TOKEN_NOT_FOUND'),
+      );
 
-      const result = await service.refreshAccessToken('refresh-token');
+      await expect(service.refreshAccessToken('invalid')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
 
-      expect(result.accessToken).toBe('access-token');
-      expect(userService.invalidateRefreshToken).toHaveBeenCalledWith(
-        'refresh-token',
+    it('should throw UnauthorizedException for inactive user', async () => {
+      userService.atomicRotateRefreshToken.mockRejectedValue(
+        new Error('USER_INACTIVE'),
+      );
+
+      await expect(service.refreshAccessToken('valid')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should re-throw unexpected errors', async () => {
+      const unexpectedError = new Error('DB_CONNECTION_LOST');
+      userService.atomicRotateRefreshToken.mockRejectedValue(unexpectedError);
+
+      await expect(service.refreshAccessToken('valid')).rejects.toThrow(
+        'DB_CONNECTION_LOST',
       );
     });
   });

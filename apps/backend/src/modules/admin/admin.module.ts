@@ -34,7 +34,7 @@ import { EmailModule } from '../../email/email.module';
       AdminAuditLog,
       Dispute,
     ]),
-    EscrowModule,
+    forwardRef(() => EscrowModule),
     KycModule,
     EmailModule,
     forwardRef(() => WebhookModule),
