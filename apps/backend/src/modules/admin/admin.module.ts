@@ -32,7 +32,7 @@ import { AdminKycController } from './controllers/admin-kyc.controller';
       AdminAuditLog,
       Dispute,
     ]),
-    EscrowModule,
+    forwardRef(() => EscrowModule),
     KycModule,
     forwardRef(() => WebhookModule),
   ],

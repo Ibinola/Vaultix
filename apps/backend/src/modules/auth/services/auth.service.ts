@@ -5,6 +5,7 @@ import {
   Logger,
   UnauthorizedException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -126,24 +127,73 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  /**
+   * Rotate a refresh token atomically.
+   *
+   * The consumed token is deactivated and its successor is issued within a
+   * single serialised database transaction so that exactly one concurrent
+   * caller wins the race.
+   *
+   * @returns A new access + refresh token pair.
+   * @throws UnauthorizedException  Token is invalid, expired, already used,
+   *                                or belongs to an inactive user.
+   * @throws ConflictException       Another request already consumed this
+   *                                 token (concurrent replay).
+   */
   async refreshAccessToken(
     refreshToken: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const token = await this.userService.findRefreshToken(refreshToken);
+    // Pre-generate successor token material *before* entering the transaction
+    // so the crypto work happens outside the critical section.
+    const newTokenValue = crypto.randomBytes(32).toString('hex');
+    const newExpiresAt = new Date();
+    newExpiresAt.setDate(newExpiresAt.getDate() + 7); // 7 days
 
-    if (!token || token.expiresAt < new Date()) {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+    try {
+      const result = await this.userService.atomicRotateRefreshToken(
+        refreshToken,
+        newTokenValue,
+        newExpiresAt,
+      );
+
+      const newAccessToken = this.generateAccessToken(
+        result.consumed.user.id,
+        result.consumed.user.walletAddress,
+      );
+
+      this.logger.log({
+        msg: 'Refresh token rotated successfully',
+        userId: result.consumed.user.id,
+      });
+
+      return { accessToken: newAccessToken, refreshToken: result.newToken };
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+
+      // Map domain errors to HTTP-layer exceptions without leaking token
+      // values into logs.
+      if (message === 'REFRESH_TOKEN_ALREADY_CONSUMED') {
+        this.logger.warn({ msg: 'Refresh token replay detected' });
+        throw new ConflictException(
+          'Refresh token has already been used. Please re-authenticate.',
+        );
+      }
+      if (
+        message === 'REFRESH_TOKEN_NOT_FOUND' ||
+        message === 'REFRESH_TOKEN_EXPIRED'
+      ) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+      if (message === 'USER_INACTIVE') {
+        throw new UnauthorizedException(
+          'Account is deactivated. Please contact support.',
+        );
+      }
+
+      // Unexpected error — re-throw so it surfaces as 500.
+      throw error;
     }
-
-    await this.userService.invalidateRefreshToken(refreshToken);
-
-    const newAccessToken = this.generateAccessToken(
-      token.user.id,
-      token.user.walletAddress,
-    );
-    const newRefreshToken = await this.generateRefreshToken(token.user.id);
-
-    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
   async logout(refreshToken: string): Promise<void> {
