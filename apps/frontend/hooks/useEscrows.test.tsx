@@ -3,6 +3,7 @@ import { useEscrows } from './useEscrows';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { EscrowService } from '@/services/escrow';
+import { CanonicalEscrowStatus } from "@/utils/escrowStatus";
 
 jest.mock('@/services/escrow', () => ({
   EscrowService: { getEscrows: jest.fn() },
@@ -11,7 +12,7 @@ jest.mock('@/services/escrow', () => ({
 const escrow = {
   id: 'escrow-1',
   title: 'Website Development Project',
-  status: 'completed',
+  status: CanonicalEscrowStatus.COMPLETED,
   amount: '100',
   asset: 'XLM',
   creatorAddress: 'buyer',
@@ -54,6 +55,6 @@ describe('useEscrows', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3000 });
 
     const escrows = result.current.data?.pages[0].escrows;
-    expect(escrows?.every(e => e.status === 'completed')).toBe(true);
+    expect(escrows?.every(e => e.status === CanonicalEscrowStatus.COMPLETED)).toBe(true);
   });
 });

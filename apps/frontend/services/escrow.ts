@@ -7,6 +7,7 @@ import {
   IEscrowEventFilters,
 } from "@/types/escrow";
 import { EscrowService as ApiEscrowService } from "./escrow-api";
+import { CanonicalEscrowStatus } from "@/utils/escrowStatus";
 
 export class EscrowService {
   static async getEscrows(
@@ -42,7 +43,7 @@ export class EscrowService {
     if (typeof (ApiEscrowService as any).fundEscrow === 'function') {
       return await (ApiEscrowService as any).fundEscrow(id, fundingData);
     }
-    const res = await ApiEscrowService.updateEscrowStatus(id, "funded");
+    const res = await ApiEscrowService.updateEscrowStatus(id, CanonicalEscrowStatus.FUNDED);
     if (!res) throw new Error("Failed to fund escrow");
     return res;
   }
@@ -51,7 +52,7 @@ export class EscrowService {
     if (typeof (ApiEscrowService as any).releaseEscrow === 'function') {
       return await (ApiEscrowService as any).releaseEscrow(id);
     }
-    const res = await ApiEscrowService.updateEscrowStatus(id, "released");
+    const res = await ApiEscrowService.updateEscrowStatus(id, CanonicalEscrowStatus.COMPLETED);
     if (!res) throw new Error("Failed to release escrow");
     return res;
   }
@@ -60,7 +61,7 @@ export class EscrowService {
     if (typeof (ApiEscrowService as any).cancelEscrow === 'function') {
       return await (ApiEscrowService as any).cancelEscrow(id);
     }
-    const res = await ApiEscrowService.updateEscrowStatus(id, "cancelled");
+    const res = await ApiEscrowService.updateEscrowStatus(id, CanonicalEscrowStatus.CANCELLED);
     if (!res) throw new Error("Failed to cancel escrow");
     return res;
   }
@@ -69,7 +70,7 @@ export class EscrowService {
     if (typeof (ApiEscrowService as any).disputeEscrow === 'function') {
       return await (ApiEscrowService as any).disputeEscrow(id, reason);
     }
-    const res = await ApiEscrowService.updateEscrowStatus(id, "disputed");
+    const res = await ApiEscrowService.updateEscrowStatus(id, CanonicalEscrowStatus.DISPUTED);
     if (!res) throw new Error("Failed to dispute escrow");
     return res;
   }

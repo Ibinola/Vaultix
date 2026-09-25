@@ -1,4 +1,9 @@
 import { ICondition, IDispute, IEscrowExtended } from "@/types/escrow";
+import type { RawEscrowExtended } from "@/types/escrow";
+import {
+  CanonicalEscrowStatus,
+  normalizeEscrowStatus,
+} from "@/utils/escrowStatus";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
@@ -50,8 +55,24 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return (await response.json()) as T;
 };
 
-export const fetchEscrow = (id: string) =>
-  request<IEscrowExtended>(`/escrows/${id}`);
+/**
+ * Event payloads embed a snapshot of the escrow, including its status. Apply the
+ * same boundary normalization so consumers never compare raw wire values.
+ */
+function withNormalizedEventStatuses<T extends { escrow?: { status: string } }>(
+  response: T,
+): T {
+  if (!response.escrow) return response;
+  return {
+    ...response,
+    escrow: { ...response.escrow, status: normalizeEscrowStatus(response.escrow.status) },
+  };
+}
+
+export const fetchEscrow = async (id: string): Promise<IEscrowExtended> => {
+  const escrow = await request<RawEscrowExtended>(`/escrows/${id}`);
+  return { ...escrow, status: normalizeEscrowStatus(escrow.status) };
+};
 
 export const acceptPartyInvitation = (escrowId: string, partyId: string) =>
   request(`/escrows/${escrowId}/parties/${partyId}/accept`, {
@@ -185,7 +206,7 @@ export interface IEscrowEventsResponse {
   limit: number;
 }
 
-export const fetchEscrowEvents = (
+export const fetchEscrowEvents = async (
   escrowId: string,
   params: { page?: number; limit?: number; sortOrder?: "ASC" | "DESC" } = {},
 ): Promise<IEscrowEventsResponse> => {
@@ -194,9 +215,13 @@ export const fetchEscrowEvents = (
   if (params.limit) qp.set("limit", String(params.limit));
   if (params.sortOrder) qp.set("sortOrder", params.sortOrder);
   const qs = qp.toString();
-  return request<IEscrowEventsResponse>(
+  const response = await request<IEscrowEventsResponse>(
     `/escrows/${escrowId}/events${qs ? `?${qs}` : ""}`,
   );
+  return {
+    ...response,
+    data: (response.data ?? []).map(withNormalizedEventStatuses),
+  };
 };
 
 // Global Events / Transaction History
@@ -214,7 +239,7 @@ export interface IEventResponse {
     amount: number;
     assetCode: string;
     assetIssuer?: string;
-    status: string;
+    status: CanonicalEscrowStatus;
     completedAt?: string;
     deadline?: string;
   };
@@ -239,7 +264,7 @@ export const expireEscrow = (
     body: data ? JSON.stringify(data) : undefined,
   });
 
-export const fetchEvents = (
+export const fetchEvents = async (
   params: {
     page?: number;
     limit?: number;
@@ -261,10 +286,14 @@ export const fetchEvents = (
   if (params.sortOrder) queryParams.set("sortOrder", params.sortOrder);
 
   const queryString = queryParams.toString();
-  return request<IEventsListResponse>(
+  const response = await request<IEventsListResponse>(
     `/events${queryString ? `?${queryString}` : ""}`,
     {
       method: "GET",
     },
   );
+  return {
+    ...response,
+    data: (response.data ?? []).map(withNormalizedEventStatuses),
+  };
 };
