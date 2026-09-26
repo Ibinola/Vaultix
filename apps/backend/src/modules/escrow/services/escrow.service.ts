@@ -156,6 +156,11 @@ export class EscrowService {
             description: conditionDto.description,
             type: conditionDto.type,
             metadata: conditionDto.metadata,
+            amount:
+              conditionDto.metadata?.kind === 'milestone' &&
+              typeof conditionDto.metadata.amount === 'string'
+                ? conditionDto.metadata.amount
+                : undefined,
           }),
         );
         await this.conditionRepository.save(conditions);

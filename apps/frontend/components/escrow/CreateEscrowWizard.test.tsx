@@ -4,8 +4,15 @@ import userEvent from '@testing-library/user-event';
 import CreateEscrowWizard from './CreateEscrowWizard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/app/contexts/ToastProvider';
-import { WalletProvider } from '@/app/contexts/WalletContext';
+import { useWallet } from '@/app/contexts/WalletContext';
 import { AssetService } from '@/services/assets';
+import { prepareEscrowCreation, submitEscrowCreation } from '@/services/escrow-creation';
+
+jest.mock('@/app/contexts/WalletContext', () => ({ useWallet: jest.fn() }));
+jest.mock('@/services/escrow-creation', () => ({
+  prepareEscrowCreation: jest.fn(),
+  submitEscrowCreation: jest.fn(),
+}));
 
 jest.mock('@stellar/freighter-api', () => ({
   isConnected: jest.fn(),
@@ -36,9 +43,7 @@ function renderWizard() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <WalletProvider>
-          <CreateEscrowWizard />
-        </WalletProvider>
+        <CreateEscrowWizard />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -50,8 +55,14 @@ async function goToBasicInfo(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('CreateEscrowWizard', () => {
+  const signTransaction = jest.fn();
+
   beforeEach(() => {
     jest.clearAllMocks();
+    (useWallet as jest.Mock).mockReturnValue({
+      activeAccount: { publicKey: VALID_STELLAR_ADDRESS, walletType: 'freighter', network: 'testnet' },
+      signTransaction,
+    });
     (AssetService.getActiveAssets as jest.Mock).mockResolvedValue([
       { id: 'xlm', code: 'XLM', displayName: 'Stellar Lumens', decimals: 7, active: true },
     ]);
@@ -139,4 +150,96 @@ describe('CreateEscrowWizard', () => {
     await waitFor(() => expect(screen.getByText(/Review & Confirm/i)).toBeInTheDocument());
     expect(screen.getByText('Project Development')).toBeInTheDocument();
   });
+
+  it('retains the validated form and reuses its intent after wallet signing is rejected', async () => {
+    (prepareEscrowCreation as jest.Mock).mockImplementation((intentId) =>
+      Promise.resolve({ intentId, chainEscrowId: '7001', unsignedXdr: 'unsigned-xdr' }),
+    );
+    signTransaction.mockRejectedValueOnce(new Error('User rejected the transaction.'))
+      .mockResolvedValueOnce('signed-xdr');
+    (submitEscrowCreation as jest.Mock).mockResolvedValue({
+      escrowId: 'db-escrow-id',
+      transactionHash: 'real-transaction-hash',
+      status: 'confirmed',
+    });
+
+    const user = userEvent.setup();
+    renderWizard();
+    await goToBasicInfo(user);
+    await user.type(screen.getByLabelText(/Title/i), 'Project Development');
+    await user.selectOptions(screen.getByLabelText(/Category/i), 'service');
+    await user.type(screen.getByLabelText(/Description/i), 'This is a long enough description for the test.');
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.type(screen.getByLabelText(/Counterparty Address/i), VALID_STELLAR_ADDRESS);
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.type(screen.getByLabelText(/Amount/i), '1.25');
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    fireEvent.change(screen.getByLabelText(/Deadline/i), {
+      target: { value: futureDate.toISOString().slice(0, 16) },
+    });
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await screen.findByText('Project Development');
+
+    await user.click(screen.getByRole('button', { name: /Create Escrow/i }));
+    expect(await screen.findByText('User rejected the transaction.')).toBeInTheDocument();
+    expect(screen.getByText('1.25 XLM')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Create Escrow/i }));
+    expect(await screen.findByText('Escrow Created Successfully!')).toBeInTheDocument();
+    expect(screen.getByText('db-escrow-id')).toBeInTheDocument();
+    expect(screen.getByText('real-transaction-hash')).toBeInTheDocument();
+    expect(signTransaction).toHaveBeenCalledTimes(2);
+    const firstIntent = (prepareEscrowCreation as jest.Mock).mock.calls[0][0];
+    const retriedIntent = (prepareEscrowCreation as jest.Mock).mock.calls[1][0];
+    expect(retriedIntent).toBe(firstIntent);
+    expect(submitEscrowCreation).toHaveBeenCalledWith(firstIntent, 'signed-xdr');
+  }, 20000);
+
+  it('retries an ambiguous submission using the same signed XDR and intent', async () => {
+    (prepareEscrowCreation as jest.Mock).mockImplementation((intentId) =>
+      Promise.resolve({ intentId, chainEscrowId: '7002', unsignedXdr: 'unsigned-xdr' }),
+    );
+    signTransaction.mockResolvedValue('same-signed-xdr');
+    (submitEscrowCreation as jest.Mock)
+      .mockRejectedValueOnce(new Error('Escrow transaction is pending; retry the same submission.'))
+      .mockResolvedValueOnce({
+        escrowId: 'db-escrow-retried',
+        transactionHash: 'same-transaction-hash',
+        status: 'confirmed',
+      });
+
+    const user = userEvent.setup();
+    renderWizard();
+    await goToBasicInfo(user);
+    await user.type(screen.getByLabelText(/Title/i), 'Project Development');
+    await user.selectOptions(screen.getByLabelText(/Category/i), 'service');
+    await user.type(screen.getByLabelText(/Description/i), 'This is a long enough description for the test.');
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.type(screen.getByLabelText(/Counterparty Address/i), VALID_STELLAR_ADDRESS);
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.type(screen.getByLabelText(/Amount/i), '1.25');
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    fireEvent.change(screen.getByLabelText(/Deadline/i), {
+      target: { value: futureDate.toISOString().slice(0, 16) },
+    });
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await user.click(screen.getByRole('button', { name: /Next/i }));
+    await screen.findByText('Project Development');
+
+    await user.click(screen.getByRole('button', { name: /Create Escrow/i }));
+    expect(await screen.findByText(/pending; retry the same submission/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Create Escrow/i }));
+    expect(await screen.findByText('Escrow Created Successfully!')).toBeInTheDocument();
+
+    expect(prepareEscrowCreation).toHaveBeenCalledTimes(1);
+    expect(signTransaction).toHaveBeenCalledTimes(1);
+    const intentId = (prepareEscrowCreation as jest.Mock).mock.calls[0][0];
+    expect(submitEscrowCreation).toHaveBeenNthCalledWith(1, intentId, 'same-signed-xdr');
+    expect(submitEscrowCreation).toHaveBeenNthCalledWith(2, intentId, 'same-signed-xdr');
+  }, 20000);
 });

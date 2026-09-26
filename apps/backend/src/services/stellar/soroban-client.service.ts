@@ -10,6 +10,13 @@ export interface OnchainEscrow {
   recipient: string;
 }
 
+export class SorobanSimulationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SorobanSimulationError';
+  }
+}
+
 @Injectable()
 export class SorobanClientService {
   private readonly logger = new Logger(SorobanClientService.name);
@@ -134,6 +141,19 @@ export class SorobanClientService {
 
   getRpc(): StellarSdk.rpc.Server {
     return this.rpcServer;
+  }
+
+  async prepareTransaction(
+    transaction: StellarSdk.Transaction,
+  ): Promise<string> {
+    const simulation = await this.rpcServer.simulateTransaction(transaction);
+    if ('error' in simulation) {
+      throw new SorobanSimulationError(String(simulation.error));
+    }
+    return StellarSdk.rpc
+      .assembleTransaction(transaction, simulation)
+      .build()
+      .toXDR();
   }
 
   /**

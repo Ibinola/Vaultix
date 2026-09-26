@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 import { User } from './modules/user/entities/user.entity';
 import { RefreshToken } from './modules/user/entities/refresh-token.entity';
 import { Escrow } from './modules/escrow/entities/escrow.entity';
+import { EscrowCreationIntent } from './modules/escrow/entities/escrow-creation-intent.entity';
 import { Party } from './modules/escrow/entities/party.entity';
 import { Condition } from './modules/escrow/entities/condition.entity';
 import { EscrowEvent } from './modules/escrow/entities/escrow-event.entity';
@@ -29,6 +30,7 @@ export default new DataSource({
     User,
     RefreshToken,
     Escrow,
+    EscrowCreationIntent,
     Party,
     Condition,
     EscrowEvent,
