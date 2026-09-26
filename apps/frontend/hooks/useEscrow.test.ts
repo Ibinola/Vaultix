@@ -8,6 +8,7 @@ jest.mock('socket.io-client', () => ({
   io: jest.fn(() => ({
     on: jest.fn(),
     off: jest.fn(),
+    removeAllListeners: jest.fn(),
     emit: jest.fn(),
     disconnect: jest.fn(),
   })),

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Loader2 } from 'lucide-react';
+import { getAccessToken, hydrateSession, subscribeToSession } from '@/lib/session';
 
 interface WebSocketContextType {
   socket: Socket | null;
@@ -23,14 +24,31 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    hydrateSession();
+    return getAccessToken();
+  });
+
+  useEffect(() => {
+    hydrateSession();
+    setAuthToken(getAccessToken());
+    return subscribeToSession(() => {
+      setAuthToken(getAccessToken());
+    });
+  }, []);
 
   useEffect(() => {
     const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3000';
-    const token = localStorage.getItem('vaultix_token') || localStorage.getItem('authToken');
-    
+    const legacyToken =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('authToken')
+        : null;
+    const token = authToken ?? legacyToken;
+
     const socketInstance = io(`${WEBSOCKET_URL.replace(/\/$/, '')}/escrow`, {
       transports: ['websocket'],
-      auth: { token },
+      auth: { token: token ?? undefined },
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: 10,
@@ -59,14 +77,17 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
     setSocket(socketInstance);
 
     return () => {
+      socketInstance.removeAllListeners();
       socketInstance.disconnect();
     };
-  }, []);
+  }, [authToken]);
+
+  const showReconnectBanner = authToken !== null && !isConnected;
 
   return (
     <WebSocketContext.Provider value={{ socket, isConnected, connectionError }}>
       {children}
-      {!isConnected && (
+      {showReconnectBanner && (
         <div 
           aria-live="polite"
           className="fixed bottom-0 left-0 w-full bg-amber-500 text-white text-center py-2 text-sm font-semibold shadow-lg z-[100] flex items-center justify-center gap-2 animate-in slide-in-from-bottom"
