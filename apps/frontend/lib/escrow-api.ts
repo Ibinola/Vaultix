@@ -1,5 +1,6 @@
 import { ICondition, IDispute, IEscrowExtended } from "@/types/escrow";
 import type { RawEscrowExtended } from "@/types/escrow";
+import { getAccessToken } from "./session";
 import {
   CanonicalEscrowStatus,
   normalizeEscrowStatus,
