@@ -33,9 +33,14 @@ import { KycGuard } from '../../kyc/guards/kyc.guard';
 import { EscrowAccessGuard } from '../guards/escrow-access.guard';
 import { EscrowExpireGuard } from '../guards/escrow-expire.guard';
 import { EscrowService } from '../services/escrow.service';
+import { EscrowCreationService } from '../services/escrow-creation.service';
 import { EscrowEvidenceService } from '../services/escrow-evidence.service';
 import { IpfsService } from '../../ipfs/ipfs.service';
 import { CreateEscrowDto } from '../dto/create-escrow.dto';
+import {
+  PrepareEscrowCreationDto,
+  SubmitEscrowCreationDto,
+} from '../dto/create-escrow-intent.dto';
 import { UpdateEscrowDto } from '../dto/update-escrow.dto';
 import { ListEscrowsDto } from '../dto/list-escrows.dto';
 import { ListEventsDto } from '../dto/list-events.dto';
@@ -65,6 +70,7 @@ interface AuthenticatedRequest extends ExpressRequest {
 export class EscrowController {
   constructor(
     private readonly escrowService: EscrowService,
+    private readonly creationService: EscrowCreationService,
     private readonly evidenceService: EscrowEvidenceService,
     private readonly ipfsService: IpfsService,
   ) {}
@@ -87,6 +93,34 @@ export class EscrowController {
     const userId = this.getAuthenticatedUserId(req);
     const ipAddress = req.ip || req.socket?.remoteAddress;
     return this.escrowService.create(dto, userId, ipAddress);
+  }
+
+  @Post('creation-intents')
+  @UseGuards(KycGuard)
+  async prepareCreation(
+    @Body() dto: PrepareEscrowCreationDto,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.creationService.prepare(
+      dto,
+      this.getAuthenticatedUserId(req),
+      req.user.walletAddress,
+    );
+  }
+
+  @Post('creation-intents/:intentId/submit')
+  @UseGuards(KycGuard)
+  async submitCreation(
+    @Param('intentId') intentId: string,
+    @Body() dto: SubmitEscrowCreationDto,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.creationService.submit(
+      intentId,
+      dto.signedXdr,
+      this.getAuthenticatedUserId(req),
+      req.user.walletAddress,
+    );
   }
 
   @Get()

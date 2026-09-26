@@ -112,10 +112,7 @@ export const uploadEvidence = async (
   const formData = new FormData();
   formData.append("file", file);
 
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("vaultix_token")
-      : null;
+  const token = typeof window !== "undefined" ? getAccessToken() : null;
 
   const response = await fetch(
     `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/v1/escrows/${escrowId}/evidence`,
